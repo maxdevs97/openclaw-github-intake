@@ -1,0 +1,38 @@
+name: openclaw-github-intake
+region: nyc
+services:
+  - name: web
+    source_dir: /
+    github:
+      repo: maxdevs97/openclaw-github-intake
+      branch: main
+      deploy_on_push: true
+    run_command: node src/index.js
+    environment_slug: node-js
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    http_port: 3000
+    health_check:
+      http_path: /health
+    envs:
+      - key: GITHUB_APP_ID
+        value: "3109474"
+        scope: RUN_TIME
+      - key: GITHUB_APP_PRIVATE_KEY
+        type: SECRET
+        scope: RUN_TIME
+      - key: GITHUB_INSTALLATION_ID
+        value: "116907903"
+        scope: RUN_TIME
+      - key: WEBHOOK_SECRET
+        type: SECRET
+        scope: RUN_TIME
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        type: SECRET
+        scope: RUN_TIME
+      - key: SLACK_WEBHOOK_URL
+        type: SECRET
+        scope: RUN_TIME
+      - key: PROJECT_REGISTRY_SHEET_ID
+        scope: RUN_TIME
+        value: ""

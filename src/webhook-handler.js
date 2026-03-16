@@ -3,7 +3,7 @@
  */
 const crypto = require('crypto');
 const { githubRequest } = require('./github-auth');
-const { registerProject, updateLastActivity } = require('./sheets');
+const { registerProject, updateLastActivity, getChannelForRepo } = require('./sheets');
 const { notifyNewRepo, notifyPRActivity } = require('./slack');
 
 /**
@@ -86,13 +86,14 @@ async function handleRepoCreated(payload) {
     console.error(`[webhook] Failed to register in Google Sheet: ${err.message}`);
   }
 
-  // 4. Send Slack notification
+  // 4. Send Slack notification (no specific channel for auto-created repos)
   await notifyNewRepo({
     repoName: repo.name,
     repoUrl: repo.html_url,
     orgName,
     creatorLogin: payload.sender?.login,
     sheetUrl
+    // targetChannelId not set — uses default channel
   });
 }
 
@@ -116,7 +117,10 @@ async function handlePullRequest(payload) {
     console.error(`[webhook] Failed to update sheet: ${err.message}`);
   }
 
-  // Send Slack notification
+  // Look up channel for this repo, then notify
+  let prChannel = null;
+  try { prChannel = await getChannelForRepo(repo.name); } catch (_) {}
+
   await notifyPRActivity({
     action,
     repoName: repo.name,
@@ -124,7 +128,8 @@ async function handlePullRequest(payload) {
     prUrl: pr.html_url,
     prNumber: pr.number,
     author: pr.user?.login,
-    orgName
+    orgName,
+    targetChannelId: prChannel
   });
 }
 

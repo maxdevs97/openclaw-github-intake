@@ -4,10 +4,11 @@
 const { google } = require('googleapis');
 
 let sheetsClient = null;
-let driveClient = null;
 
 const SHEET_NAME = 'Projects';
-const COLUMNS = ['Repo Name', 'URL', 'Created Date', 'Status', 'Last Activity'];
+// Updated columns: added Client Name and Slack Channel
+const COLUMNS = ['Repo Name', 'URL', 'Client Name', 'Slack Channel', 'Created Date', 'Status', 'Last Activity'];
+const COL_COUNT = COLUMNS.length; // 7
 
 function getCredentials() {
   // Support multiple env var formats
@@ -49,7 +50,6 @@ async function getSheetsClient() {
  * Get existing sheet ID from env or create if doesn't exist
  */
 async function getOrCreateRegistrySheet() {
-  // If we have an existing sheet ID, use it
   const existingId = process.env.GOOGLE_SHEET_ID || process.env.PROJECT_REGISTRY_SHEET_ID;
   if (existingId) return existingId;
 
@@ -74,7 +74,7 @@ async function getOrCreateRegistrySheet() {
   // Add headers
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${SHEET_NAME}!A1:E1`,
+    range: `${SHEET_NAME}!A1:G1`,
     valueInputOption: 'RAW',
     requestBody: { values: [COLUMNS] }
   });
@@ -95,7 +95,7 @@ async function getOrCreateRegistrySheet() {
 }
 
 /**
- * Ensure the Projects sheet/tab has headers
+ * Ensure the Projects sheet/tab has the correct headers (migrates old format if needed)
  */
 async function ensureHeaders(spreadsheetId) {
   const sheets = await getSheetsClient();
@@ -105,7 +105,6 @@ async function ensureHeaders(spreadsheetId) {
   const sheetTitles = meta.data.sheets.map(s => s.properties.title);
 
   if (!sheetTitles.includes(SHEET_NAME)) {
-    // Add the Projects sheet
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -118,58 +117,67 @@ async function ensureHeaders(spreadsheetId) {
     });
   }
 
-  // Check if headers exist
+  // Check if headers exist and are up to date
   const headerCheck = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAME}!A1:E1`
+    range: `${SHEET_NAME}!A1:G1`
   });
 
-  if (!headerCheck.data.values || headerCheck.data.values[0]?.[0] !== 'Repo Name') {
+  const existingHeaders = headerCheck.data.values?.[0] || [];
+  const needsUpdate = existingHeaders[0] !== 'Repo Name' || existingHeaders[2] !== 'Client Name';
+
+  if (needsUpdate) {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${SHEET_NAME}!A1:E1`,
+      range: `${SHEET_NAME}!A1:G1`,
       valueInputOption: 'RAW',
       requestBody: { values: [COLUMNS] }
     });
-    console.log('[sheets] Added headers to Projects sheet');
+    console.log('[sheets] Updated headers in Projects sheet (new columns: Client Name, Slack Channel)');
   }
 }
 
 /**
  * Add a new project row to the registry
+ * @param {object} opts
+ * @param {string} opts.repoName
+ * @param {string} opts.url
+ * @param {string} [opts.clientName]
+ * @param {string} [opts.slackChannelId]
+ * @param {string} [opts.createdDate]
  */
-async function registerProject({ repoName, url, createdDate }) {
+async function registerProject({ repoName, url, clientName = '', slackChannelId = '', createdDate }) {
   const spreadsheetId = await getOrCreateRegistrySheet();
   await ensureHeaders(spreadsheetId);
   const sheets = await getSheetsClient();
 
   const now = new Date().toISOString();
-  const row = [repoName, url, createdDate || now, 'Active', now];
+  // Columns: Repo Name, URL, Client Name, Slack Channel, Created Date, Status, Last Activity
+  const row = [repoName, url, clientName, slackChannelId, createdDate || now, 'Active', now];
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${SHEET_NAME}!A:E`,
+    range: `${SHEET_NAME}!A:G`,
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: [row] }
   });
 
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
-  console.log(`[sheets] Registered project: ${repoName}`);
+  console.log(`[sheets] Registered project: ${repoName} (client: ${clientName || 'N/A'})`);
   return sheetUrl;
 }
 
 /**
- * Update Last Activity for a repo
+ * Update Last Activity for a repo (column G = index 6)
  */
 async function updateLastActivity(repoName) {
   const spreadsheetId = await getOrCreateRegistrySheet();
   const sheets = await getSheetsClient();
 
-  // Find the row with this repo name
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${SHEET_NAME}!A:E`
+    range: `${SHEET_NAME}!A:G`
   });
 
   const rows = response.data.values || [];
@@ -188,9 +196,10 @@ async function updateLastActivity(repoName) {
   }
 
   const now = new Date().toISOString();
+  // Last Activity is column G (7th col)
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${SHEET_NAME}!E${rowIndex + 1}`,
+    range: `${SHEET_NAME}!G${rowIndex + 1}`,
     valueInputOption: 'RAW',
     requestBody: { values: [[now]] }
   });
@@ -198,4 +207,29 @@ async function updateLastActivity(repoName) {
   console.log(`[sheets] Updated last activity for: ${repoName}`);
 }
 
-module.exports = { registerProject, updateLastActivity, getOrCreateRegistrySheet };
+/**
+ * Look up the Slack channel ID for a given repo (for PR/push notifications)
+ */
+async function getChannelForRepo(repoName) {
+  try {
+    const spreadsheetId = await getOrCreateRegistrySheet();
+    const sheets = await getSheetsClient();
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${SHEET_NAME}!A:D`
+    });
+
+    const rows = response.data.values || [];
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === repoName && rows[i][3]) {
+        return rows[i][3]; // Column D = Slack Channel ID
+      }
+    }
+  } catch (err) {
+    console.error(`[sheets] Failed to look up channel for ${repoName}:`, err.message);
+  }
+  return null;
+}
+
+module.exports = { registerProject, updateLastActivity, getOrCreateRegistrySheet, getChannelForRepo };

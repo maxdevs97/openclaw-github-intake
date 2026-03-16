@@ -8,7 +8,7 @@ const express = require('express');
 const { verifySignature, handleRepoCreated, handlePullRequest, handlePush } = require('./webhook-handler');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Capture raw body for HMAC signature verification
 app.use((req, res, next) => {
@@ -76,6 +76,8 @@ app.listen(PORT, () => {
   console.log(`[server] Webhook endpoint: POST /webhook`);
   console.log(`[server] App ID: ${process.env.GITHUB_APP_ID}`);
   console.log(`[server] Installation ID: ${process.env.GITHUB_INSTALLATION_ID}`);
-  console.log(`[server] Webhook secret configured: ${!!process.env.WEBHOOK_SECRET}`);
-  console.log(`[server] Slack webhook configured: ${!!process.env.SLACK_WEBHOOK_URL}`);
+  console.log(`[server] Webhook secret configured: ${!!(process.env.GITHUB_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET)}`);
+  console.log(`[server] Slack configured: ${!!(process.env.SLACK_BOT_TOKEN || process.env.SLACK_WEBHOOK_URL)}`);
+  console.log(`[server] Google Sheets configured: ${!!(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_B64 || process.env.GOOGLE_SERVICE_ACCOUNT_PATH)}`);
+  console.log(`[server] Sheet ID: ${process.env.GOOGLE_SHEET_ID || 'will create on first use'}`);
 });

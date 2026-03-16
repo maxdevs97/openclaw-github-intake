@@ -9,24 +9,34 @@ let cachedToken = null;
 let tokenExpiry = null;
 
 /**
+ * Get the private key from environment (supports multiple env var names and formats)
+ */
+function getPrivateKey() {
+  // Support multiple env var names
+  let key = process.env.GITHUB_PRIVATE_KEY || process.env.GITHUB_APP_PRIVATE_KEY;
+
+  if (!key && process.env.GITHUB_APP_PRIVATE_KEY_PATH) {
+    const fs = require('fs');
+    key = fs.readFileSync(process.env.GITHUB_APP_PRIVATE_KEY_PATH, 'utf8');
+  }
+
+  if (!key) {
+    throw new Error('No GitHub private key found. Set GITHUB_PRIVATE_KEY, GITHUB_APP_PRIVATE_KEY, or GITHUB_APP_PRIVATE_KEY_PATH');
+  }
+
+  // Handle escaped newlines from env vars
+  return key.replace(/\\n/g, '\n');
+}
+
+/**
  * Generate a GitHub App JWT (valid for 10 minutes)
  */
 function generateAppJWT() {
   const appId = process.env.GITHUB_APP_ID;
+  const privateKey = getPrivateKey();
 
-  // Support both inline key (with \n escaping) and file path
-  let privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
-  if (!privateKey && process.env.GITHUB_APP_PRIVATE_KEY_PATH) {
-    const fs = require('fs');
-    privateKey = fs.readFileSync(process.env.GITHUB_APP_PRIVATE_KEY_PATH, 'utf8');
-  }
-  // Handle escaped newlines from env var
-  if (privateKey) {
-    privateKey = privateKey.replace(/\\n/g, '\n');
-  }
-
-  if (!appId || !privateKey) {
-    throw new Error('GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (or GITHUB_APP_PRIVATE_KEY_PATH) must be set');
+  if (!appId) {
+    throw new Error('GITHUB_APP_ID must be set');
   }
 
   const now = Math.floor(Date.now() / 1000);

@@ -1,21 +1,39 @@
 /**
  * Slack notifications
+ * Supports both Bot Token (chat.postMessage) and Webhook URL
  */
 const axios = require('axios');
 
 async function sendSlackMessage(text, blocks = null) {
+  const botToken = process.env.SLACK_BOT_TOKEN;
   const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const channel = process.env.SLACK_DEFAULT_CHANNEL || 'D0ADEL2FRCM'; // Max's DM
 
-  if (!webhookUrl) {
-    console.log('[slack] No webhook URL configured, skipping notification');
+  if (!botToken && !webhookUrl) {
+    console.log('[slack] No Slack credentials configured, skipping notification');
     return;
   }
 
-  const payload = { text };
-  if (blocks) payload.blocks = blocks;
-
   try {
-    await axios.post(webhookUrl, payload);
+    if (botToken) {
+      // Use Slack Web API
+      const payload = {
+        channel,
+        text,
+        ...(blocks ? { blocks } : {})
+      };
+      await axios.post('https://slack.com/api/chat.postMessage', payload, {
+        headers: {
+          Authorization: `Bearer ${botToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+    } else {
+      // Use incoming webhook
+      const payload = { text };
+      if (blocks) payload.blocks = blocks;
+      await axios.post(webhookUrl, payload);
+    }
     console.log('[slack] Notification sent');
   } catch (err) {
     console.error('[slack] Failed to send notification:', err.message);

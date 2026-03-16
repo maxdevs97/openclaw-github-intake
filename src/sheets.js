@@ -4,25 +4,35 @@
 const { google } = require('googleapis');
 
 let sheetsClient = null;
-let registrySpreadsheetId = process.env.PROJECT_REGISTRY_SHEET_ID || null;
+let driveClient = null;
 
-const SHEET_NAME = 'Project Registry';
+const SHEET_NAME = 'Projects';
 const COLUMNS = ['Repo Name', 'URL', 'Created Date', 'Status', 'Last Activity'];
 
-function getAuth() {
-  let credentials;
+function getCredentials() {
+  // Support multiple env var formats
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  } else if (process.env.GOOGLE_SERVICE_ACCOUNT_PATH) {
-    const fs = require('fs');
-    credentials = JSON.parse(fs.readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_PATH, 'utf8'));
-  } else {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_PATH must be set');
+    return JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
   }
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_B64) {
+    return JSON.parse(Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'));
+  }
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_PATH) {
+    const fs = require('fs');
+    return JSON.parse(fs.readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_PATH, 'utf8'));
+  }
+  throw new Error('No Google service account credentials found');
+}
+
+function getAuth() {
+  const credentials = getCredentials();
   return new google.auth.JWT({
     email: credentials.client_email,
     key: credentials.private_key,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'],
+    scopes: [
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/drive'
+    ],
     subject: 'max@sheragency.com'
   });
 }
@@ -36,19 +46,20 @@ async function getSheetsClient() {
 }
 
 /**
- * Create the Project Registry spreadsheet if it doesn't exist
+ * Get existing sheet ID from env or create if doesn't exist
  */
-async function ensureRegistrySheet() {
-  if (registrySpreadsheetId) return registrySpreadsheetId;
+async function getOrCreateRegistrySheet() {
+  // If we have an existing sheet ID, use it
+  const existingId = process.env.GOOGLE_SHEET_ID || process.env.PROJECT_REGISTRY_SHEET_ID;
+  if (existingId) return existingId;
 
-  const sheets = await getSheetsClient();
+  const auth = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
 
   // Create a new spreadsheet
   const response = await sheets.spreadsheets.create({
     requestBody: {
-      properties: {
-        title: 'Project Registry'
-      },
+      properties: { title: 'Project Registry' },
       sheets: [{
         properties: {
           title: SHEET_NAME,
@@ -59,43 +70,16 @@ async function ensureRegistrySheet() {
   });
 
   const spreadsheetId = response.data.spreadsheetId;
-  const spreadsheetUrl = response.data.spreadsheetUrl;
 
   // Add headers
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range: `${SHEET_NAME}!A1:E1`,
     valueInputOption: 'RAW',
-    requestBody: {
-      values: [COLUMNS]
-    }
-  });
-
-  // Bold the header row
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: [{
-        repeatCell: {
-          range: {
-            sheetId: 0,
-            startRowIndex: 0,
-            endRowIndex: 1
-          },
-          cell: {
-            userEnteredFormat: {
-              textFormat: { bold: true },
-              backgroundColor: { red: 0.2, green: 0.2, blue: 0.6 }
-            }
-          },
-          fields: 'userEnteredFormat(textFormat,backgroundColor)'
-        }
-      }]
-    }
+    requestBody: { values: [COLUMNS] }
   });
 
   // Share with Max
-  const auth = getAuth();
   const drive = google.drive({ version: 'v3', auth });
   await drive.permissions.create({
     fileId: spreadsheetId,
@@ -106,20 +90,57 @@ async function ensureRegistrySheet() {
     }
   });
 
-  console.log(`[sheets] Created Project Registry: ${spreadsheetUrl}`);
-
-  // Store the ID for future use
-  registrySpreadsheetId = spreadsheetId;
-  process.env.PROJECT_REGISTRY_SHEET_ID = spreadsheetId;
-
+  console.log(`[sheets] Created Project Registry: https://docs.google.com/spreadsheets/d/${spreadsheetId}`);
   return spreadsheetId;
+}
+
+/**
+ * Ensure the Projects sheet/tab has headers
+ */
+async function ensureHeaders(spreadsheetId) {
+  const sheets = await getSheetsClient();
+
+  // Get existing sheets
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheetTitles = meta.data.sheets.map(s => s.properties.title);
+
+  if (!sheetTitles.includes(SHEET_NAME)) {
+    // Add the Projects sheet
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [{
+          addSheet: {
+            properties: { title: SHEET_NAME }
+          }
+        }]
+      }
+    });
+  }
+
+  // Check if headers exist
+  const headerCheck = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SHEET_NAME}!A1:E1`
+  });
+
+  if (!headerCheck.data.values || headerCheck.data.values[0]?.[0] !== 'Repo Name') {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEET_NAME}!A1:E1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [COLUMNS] }
+    });
+    console.log('[sheets] Added headers to Projects sheet');
+  }
 }
 
 /**
  * Add a new project row to the registry
  */
 async function registerProject({ repoName, url, createdDate }) {
-  const spreadsheetId = await ensureRegistrySheet();
+  const spreadsheetId = await getOrCreateRegistrySheet();
+  await ensureHeaders(spreadsheetId);
   const sheets = await getSheetsClient();
 
   const now = new Date().toISOString();
@@ -130,9 +151,7 @@ async function registerProject({ repoName, url, createdDate }) {
     range: `${SHEET_NAME}!A:E`,
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
-    requestBody: {
-      values: [row]
-    }
+    requestBody: { values: [row] }
   });
 
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
@@ -144,7 +163,7 @@ async function registerProject({ repoName, url, createdDate }) {
  * Update Last Activity for a repo
  */
 async function updateLastActivity(repoName) {
-  const spreadsheetId = await ensureRegistrySheet();
+  const spreadsheetId = await getOrCreateRegistrySheet();
   const sheets = await getSheetsClient();
 
   // Find the row with this repo name
@@ -164,22 +183,19 @@ async function updateLastActivity(repoName) {
   }
 
   if (rowIndex === -1) {
-    console.log(`[sheets] Repo not found in registry: ${repoName}`);
+    console.log(`[sheets] Repo not found in registry: ${repoName} — skipping update`);
     return;
   }
 
   const now = new Date().toISOString();
-  // Update column E (Last Activity) — rowIndex is 0-based, sheets is 1-based
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range: `${SHEET_NAME}!E${rowIndex + 1}`,
     valueInputOption: 'RAW',
-    requestBody: {
-      values: [[now]]
-    }
+    requestBody: { values: [[now]] }
   });
 
   console.log(`[sheets] Updated last activity for: ${repoName}`);
 }
 
-module.exports = { ensureRegistrySheet, registerProject, updateLastActivity };
+module.exports = { registerProject, updateLastActivity, getOrCreateRegistrySheet };

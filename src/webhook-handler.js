@@ -10,7 +10,7 @@ const { notifyNewRepo, notifyPRActivity } = require('./slack');
  * Verify GitHub webhook signature
  */
 function verifySignature(req) {
-  const secret = process.env.WEBHOOK_SECRET;
+  const secret = process.env.GITHUB_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET;
   if (!secret) return true; // Skip verification if no secret configured
 
   const signature = req.headers['x-hub-signature-256'];

@@ -21,6 +21,13 @@ async function sendSlackMessage(text, blocks = null, targetChannel = null) {
 
   try {
     if (botToken) {
+      // Auto-join channel before posting (required for public channels)
+      try {
+        await axios.post('https://slack.com/api/conversations.join', { channel }, {
+          headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' }
+        });
+      } catch (_) { /* ignore join errors — might already be in channel or it's a DM */ }
+
       const payload = {
         channel,
         text,
@@ -34,6 +41,7 @@ async function sendSlackMessage(text, blocks = null, targetChannel = null) {
       });
       if (!response.data.ok) {
         console.error('[slack] API error:', response.data.error);
+        throw new Error(`Slack API error: ${response.data.error}`);
       }
     } else {
       // Use incoming webhook (no channel targeting)

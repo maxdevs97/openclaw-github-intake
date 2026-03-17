@@ -125,6 +125,34 @@ async function notifyPRActivity({ action, repoName, prTitle, prUrl, prNumber, au
     }
   ];
 
+  // Add action buttons for opened PRs (not for merged/closed)
+  if (action === 'opened') {
+    blocks.push({
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '🔍 Review Changes', emoji: true },
+          url: `${prUrl}/files`,
+          action_id: 'review_pr'
+        },
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '🔀 Merge with Main', emoji: true },
+          style: 'primary',
+          action_id: 'merge_pr',
+          value: JSON.stringify({ orgName, repoName, prNumber }),
+          confirm: {
+            title: { type: 'plain_text', text: 'Merge PR?' },
+            text: { type: 'mrkdwn', text: `Merge *#${prNumber}: ${prTitle}* into \`main\`?` },
+            confirm: { type: 'plain_text', text: 'Merge' },
+            deny: { type: 'plain_text', text: 'Cancel' }
+          }
+        }
+      ]
+    });
+  }
+
   await sendSlackMessage(`${actionLabel}: ${repoName} #${prNumber}`, blocks, targetChannelId);
 }
 

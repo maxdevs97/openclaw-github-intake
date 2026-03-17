@@ -13,7 +13,16 @@ const COL_COUNT = COLUMNS.length; // 7
 function getCredentials() {
   // Support multiple env var formats
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    return JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    // DO App Platform may inject literal newlines in the PEM key which breaks JSON.parse
+    // Replace actual newlines inside the JSON string with escaped \n
+    let raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      // Try fixing literal newlines in the private_key value
+      raw = raw.replace(/\n/g, '\\n').replace(/\\\\n/g, '\\n');
+      return JSON.parse(raw);
+    }
   }
   if (process.env.GOOGLE_SERVICE_ACCOUNT_B64) {
     return JSON.parse(Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'));

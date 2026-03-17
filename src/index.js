@@ -22,23 +22,15 @@ const CHANNEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
-// Capture raw body for HMAC signature verification (before JSON parse)
-app.use((req, res, next) => {
-  // Only buffer body for the webhook endpoint
-  if (req.path === '/webhook') {
-    let data = '';
-    req.setEncoding('utf8');
-    req.on('data', chunk => { data += chunk; });
-    req.on('end', () => {
-      req.rawBody = data;
-      next();
-    });
-  } else {
-    next();
+// Capture raw body for HMAC signature verification + parse JSON
+// Using express.json with verify callback to capture raw body without stream encoding conflicts
+app.use(express.json({
+  verify: (req, res, buf) => {
+    if (req.path === '/webhook') {
+      req.rawBody = buf.toString('utf8');
+    }
   }
-});
-
-app.use(express.json());
+}));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Web form (GET /) ──────────────────────────────────────────────────────────

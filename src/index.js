@@ -189,6 +189,7 @@ app.post('/register', async (req, res) => {
         orgName: org,
         clientName,
         sheetUrl,
+        branchProtection: branchProtectionApplied,
         targetChannelId: channelId
       });
       results.steps.slack = 'ok';

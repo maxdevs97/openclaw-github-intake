@@ -66,7 +66,13 @@ async function sendSlackMessage(text, blocks = null, targetChannel = null) {
  * @param {string} [opts.sheetUrl]
  * @param {string} [opts.targetChannelId] — channel to post to (falls back to default)
  */
-async function notifyNewRepo({ repoName, repoUrl, orgName, creatorLogin, clientName, sheetUrl, targetChannelId }) {
+async function notifyNewRepo({ repoName, repoUrl, orgName, creatorLogin, clientName, sheetUrl, branchProtection, targetChannelId }) {
+  // Build status line dynamically based on what actually succeeded
+  const statusParts = [];
+  if (branchProtection) statusParts.push('Branch protection on `main`');
+  statusParts.push('Private');
+  if (sheetUrl) statusParts.push(`<${sheetUrl}|View Project Registry>`);
+
   const blocks = [
     {
       type: 'header',
@@ -92,7 +98,7 @@ async function notifyNewRepo({ repoName, repoUrl, orgName, creatorLogin, clientN
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `Branch protection enabled on \`main\` • Private • <${sheetUrl}|View Project Registry>`
+        text: statusParts.join(' • ')
       }
     }
   ];

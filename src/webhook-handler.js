@@ -120,6 +120,9 @@ async function handlePullRequest(payload) {
   if (!['opened', 'closed'].includes(action)) return;
   if (action === 'closed' && !pr.merged) return; // Ignore closed-without-merge
 
+  // Skip merge notification if merged by our own bot (already notified via Slack button)
+  if (action === 'closed' && pr.merged_by?.type === 'Bot' && pr.merged_by?.login?.includes('sher-openclaw')) return;
+
   console.log(`[webhook] PR ${action}: ${repo.name}#${pr.number}`);
 
   // Update Google Sheet

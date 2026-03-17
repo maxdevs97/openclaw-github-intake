@@ -131,7 +131,7 @@ async function getSlackChannels() {
     const params = new URLSearchParams({
       limit: '1000',
       exclude_archived: 'true',
-      types: 'public_channel,private_channel'
+      types: 'public_channel'
     });
     if (cursor) params.append('cursor', cursor);
 

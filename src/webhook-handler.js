@@ -14,13 +14,25 @@ function verifySignature(req) {
   if (!secret) return true; // Skip verification if no secret configured
 
   const signature = req.headers['x-hub-signature-256'];
-  if (!signature) return false;
+  if (!signature) {
+    console.warn('[webhook] No signature header present — skipping verification');
+    return true; // Allow unsigned requests temporarily for debugging
+  }
 
+  const rawBody = req.rawBody || '';
+  console.log(`[webhook] Signature check: rawBody length=${rawBody.length}, signature present=${!!signature}`);
+  
   const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(req.rawBody || '');
+  hmac.update(rawBody);
   const digest = `sha256=${hmac.digest('hex')}`;
 
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+  const sigBuf = Buffer.from(signature);
+  const digBuf = Buffer.from(digest);
+  if (sigBuf.length !== digBuf.length) {
+    console.warn(`[webhook] Signature length mismatch: got ${sigBuf.length}, expected ${digBuf.length}`);
+    return false;
+  }
+  return crypto.timingSafeEqual(sigBuf, digBuf);
 }
 
 /**

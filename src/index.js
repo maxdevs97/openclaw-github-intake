@@ -10,7 +10,34 @@ const path = require('path');
 const { verifySignature, handleRepoCreated, handlePullRequest, handlePush } = require('./webhook-handler');
 const { githubRequest } = require('./github-auth');
 const { registerProject } = require('./sheets');
-const { notifyNewRepo, getSlackChannels } = require('./slack');
+const { notifyNewRepo, getSlackChannels, sendSlackMessage } = require('./slack');
+const slackRouter = require('./slack-actions-router');
+
+// ── Register Slack action handlers ────────────────────────────────────────────
+
+// GitHub namespace: handles github:merge_pr, github:review_pr, etc.
+slackRouter.register('github', async (action, payload) => {
+  const channel = payload.channel?.id;
+
+  if (action.action_id === 'github:merge_pr' || action.action_id === 'merge_pr') {
+    const { orgName, repoName, prNumber } = JSON.parse(action.value);
+
+    const mergeRes = await githubRequest('PUT', `/repos/${orgName}/${repoName}/pulls/${prNumber}/merge`, {
+      commit_title: `Merge PR #${prNumber} via Slack`,
+      merge_method: 'squash'
+    });
+
+    if (mergeRes.data.merged) {
+      await sendSlackMessage(`✅ PR #${prNumber} merged into \`main\` — deploying shortly.`, null, channel);
+    } else {
+      await sendSlackMessage(`❌ Could not merge PR #${prNumber}: ${mergeRes.data.message}`, null, channel);
+    }
+  }
+});
+
+// Example: register additional namespaces here as new apps are built
+// slackRouter.register('copy', require('./copy-actions'));
+// slackRouter.register('qa', require('./qa-actions'));
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -200,8 +227,10 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// ── Slack interactivity endpoint (button clicks) ─────────────────────────────
-app.post('/slack/actions', async (req, res) => {
+// ── Slack interactivity endpoint (button clicks, select menus, modals) ────────
+// This is the central router for ALL Slack interactive actions from any app.
+// Register new handlers via slackRouter.register(namespace, fn) above.
+app.post('/slack/actions', express.urlencoded({ extended: true }), async (req, res) => {
   let payload;
   try {
     payload = JSON.parse(req.body?.payload || '{}');
@@ -209,38 +238,13 @@ app.post('/slack/actions', async (req, res) => {
     return res.status(400).json({ error: 'Invalid payload' });
   }
 
-  // Acknowledge immediately (Slack requires response within 3s)
+  // Acknowledge immediately — Slack requires a response within 3 seconds
   res.status(200).send('');
 
-  const action = payload.actions?.[0];
-  if (!action) return;
+  if (!payload.actions?.length) return;
 
-  if (action.action_id === 'merge_pr') {
-    try {
-      const { orgName, repoName, prNumber } = JSON.parse(action.value);
-      const { githubRequest } = require('./github-auth');
-
-      // Merge the PR via GitHub API
-      const mergeRes = await githubRequest('PUT', `/repos/${orgName}/${repoName}/pulls/${prNumber}/merge`, {
-        commit_title: `Merge PR #${prNumber} via Slack`,
-        merge_method: 'squash'
-      });
-
-      const channel = payload.channel?.id;
-      const { sendSlackMessage } = require('./slack');
-
-      if (mergeRes.data.merged) {
-        await sendSlackMessage(`✅ PR #${prNumber} merged into \`main\` — deploying shortly.`, null, channel);
-      } else {
-        await sendSlackMessage(`❌ Could not merge PR #${prNumber}: ${mergeRes.data.message}`, null, channel);
-      }
-    } catch (err) {
-      console.error('[slack/actions] Merge failed:', err.message);
-      const channel = payload.channel?.id;
-      const { sendSlackMessage } = require('./slack');
-      await sendSlackMessage(`❌ Merge failed: ${err.response?.data?.message || err.message}`, null, channel);
-    }
-  }
+  // Route to the appropriate handler
+  await slackRouter.route(payload);
 });
 
 // ── GitHub webhook endpoint ───────────────────────────────────────────────────

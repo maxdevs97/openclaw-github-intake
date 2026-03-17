@@ -134,13 +134,13 @@ async function notifyPRActivity({ action, repoName, prTitle, prUrl, prNumber, au
           type: 'button',
           text: { type: 'plain_text', text: '🔍 Review Changes', emoji: true },
           url: `${prUrl}/files`,
-          action_id: 'review_pr'
+          action_id: 'github:review_pr'
         },
         {
           type: 'button',
           text: { type: 'plain_text', text: '🔀 Merge with Main', emoji: true },
           style: 'primary',
-          action_id: 'merge_pr',
+          action_id: 'github:merge_pr',
           value: JSON.stringify({ orgName, repoName, prNumber }),
           confirm: {
             title: { type: 'plain_text', text: 'Merge PR?' },
